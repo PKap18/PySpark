@@ -1,0 +1,91 @@
+from pyspark.sql import SparkSession
+spark_sess = SparkSession.builder.appName("Assignment7").enableHiveSupport().getOrCreate()
+
+#Load files into datadrame
+retailData_df= spark_sess.read.option("inferSchema", "true").option("header", "true") \
+.csv("/mnt/hgfs/SharedVMFolder/Spark-The-Definitive-Guide-master/data/retail-data/by-day/*")
+
+print(retailData_df.printSchema())
+retailData_df.createOrReplaceTempView("RetailData")
+
+#Display the list of Hive tables
+spark_sess.sql("show tables").show()
+
+#cache the dataframe
+retailData_df.cache()
+retailData_df.persist()
+retailData_df.count()
+
+
+#Using show() to dislay complete content of the columns for the 5 records through spark sql 
+spark_sess.sql("select * from RetailData").show(5,False)
+
+
+#Using limit() to limit to 5 records through a spark dataframe.
+retailData_df.limit(5).show()
+
+#Using show() on spark dataframe to limit the record count to 5 and display complete content of all the cols.
+retailData_df.show(5,False)
+
+#Using spark sql to limit to 5 records.
+spark_sess.sql("""SELECT * from RetailData limit 5""").show()
+
+#using show(n,False) function on dataframe to limit the record count to 5 and display complete content of all the cols.
+spark_sess.sql("""SELECT * from RetailData""").show(5,False)
+
+#Number of records for year-month combination using spark dataframe and sorting in year,month default order.
+
+from pyspark.sql.functions import *
+newdf = retailData_df.select(retailData_df.InvoiceNo,retailData_df.StockCode,retailData_df.Description,
+                             retailData_df.Quantity,retailData_df.UnitPrice,retailData_df.CustomerID,
+                             retailData_df.Country,
+                             year(retailData_df.InvoiceDate).alias('invoice_year'), 
+                             month(retailData_df.InvoiceDate).alias('invoice_month')).groupby(col('invoice_year'),col('invoice_month')).count().sort(col('invoice_year'),col('invoice_month'),
+                                                                     ascending=True).show()
+                                                                     
+
+# Number of records for year-month combination using spark sql and sorting in year,month default order.
+
+from pyspark.sql import *
+spark_sess.sql("""
+    SELECT count(*) as count,
+    DATE_FORMAT(InvoiceDate,'y') as yr, DATE_FORMAT(InvoiceDate,'M') as m
+    FROM retaildata
+    GROUP BY yr,m
+    ORDER BY yr,m ASC""").show()
+
+#Number of records having NULL in description col.
+retailData_df.select(col("Description")).where("Description is NULL").count()
+
+retailData_df_new=retailData_df.select(coalesce(col("Description"), lit("NULL-STR"))).where("Description is NULL")
+retailData_df_new.show()
+retailData_df_new.printSchema()
+
+from pyspark.sql.functions import *
+#Created new boolean column for each element in the list: ['lunch','dinner','supper','breakfast']
+
+mealtype=["lunch","breakfast","supper","dinner"]
+def meal_locator(column, meal_string):
+    return locate(meal_string.upper(), column).cast("boolean").alias("is_" + meal_string)
+
+selectedColumns = [meal_locator(retailData_df.Description, c) for c in mealtype]
+selectedColumns.append(expr("*"))
+
+#Populating the created columns
+x=retailData_df.select(*selectedColumns).where(expr("is_lunch OR is_dinner OR is_breakfast OR is_supper"))
+x.show(50, False)
+
+
+# Null handeling
+from pyspark.sql import *
+
+rtx_df=x.na.fill("NULL_STR","Description")
+rtx_df.show(50,False)
+rtx_df.where("Description IS NULL").count()
+
+#Find frequency of true/false for each created column
+
+rtx_df.select(rtx_df.is_dinner).groupby(col('is_dinner')).count().show()
+rtx_df.select(rtx_df.is_lunch).groupby(col('is_lunch')).count().show()
+rtx_df.select(rtx_df.is_breakfast).groupby(col('is_breakfast')).count().show()
+rtx_df.select(rtx_df.is_supper).groupby(col('is_supper')).count().show()
