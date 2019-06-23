@@ -1,0 +1,214 @@
+from pyspark.sql import SparkSession
+
+spark=SparkSession.builder.appName("Practice").enableHiveSupport().getOrCreate()
+
+#Reading json data present under Datasets folder
+peopleDF = spark.read.json("/home/jupyter/notebooks/datasets/people.json")
+print(peopleDF.show())
+print(peopleDF.printSchema())
+
+spark.sql("show tables").show()
+spark.sql("show databases").show()
+spark.sql("show tables in default").show()
+
+df1=spark.sql("select * from default.people_pq")\
+df1.printSchema()
+spark.sql("select * from people_pq ").show()
+
+spark.sql("insert into people_pq values (21, 'Alex')")
+spark.sql("insert into people_pq values (27, 'Jene')")
+spark.sql("insert into people_pq values (29, 'Mich')")
+
+spark.sql("select * from people_pq ").show()
+spark.sql("select * from people_pq where age between 20 and 29").show()
+df2=spark.sql("select * from people_pq where age between 20 and 29")
+df2.show()
+
+#Create a TempView Table from a dataframe and use that table to fetch records
+
+df1.createOrReplaceTempView("people_json");
+df3=spark.sql("select * from people_json where age between 10 and 25")
+df3.show()
+
+#Writing a dataframe to a parquet file
+# Write paquet file
+import os
+if not os.path.exists("/tmp/datasets/people_pq"):
+    peopleDF.write.parquet("/tmp/datasets/people_pq")
+    
+#Creating External Hive table pointing to parquet file
+
+spark.sql("CREATE EXTERNAL TABLE IF NOT EXISTS PEOPLE_PQ (age BIGINT, name STRING) \
+STORED AS PARQUET LOCATION '/tmp/datasets/people_pq'")
+
+spark.sql("show tables").show()
+spark.sql("select * from People_pq").show()
+
+#Anayzing the flight data
+flightData2015 = spark\
+.read\
+.option("inferSchema", "true")\
+.option("header", "true")\
+.csv("/mnt/hgfs/SharedVMFolder/flight-data/flight-data/csv/2015-summary.csv")
+
+
+flightData2015.show(10,False)
+flightData2015.printSchema()
+flightData2015.take(5)
+
+
+flightData2015.collect()
+flightData2015.count()
+
+#Sort on the dataframe directly without using SQL
+flightData2015.sort('count',ascending=False).show(10)
+flightData2015.sort("count","ORIGIN_COUNTRY_NAME",ascending=False).show(10)
+
+#Transformation using GROUPBY
+flightData2015.groupby('DEST_COUNTRY_NAME').agg({'count':'sum'}).sort('sum(count)',ascending=False).show()
+
+#Renaming a column using alias
+flightData2015.groupby('DEST_COUNTRY_NAME').agg({'count':'sum'}).withColumnRenamed('sum(count)', 'sum_count').sort('sum_count',ascending=False).show()
+
+#Performing operation using SPARK SQL API.
+flightData2015.createOrReplaceTempView("flight")
+spark.sql("select * from flight where DEST_COUNTRY_NAME = 'Canada' or ORIGIN_COUNTRY_NAME='Canada'").show()
+
+spark.sql("select DEST_COUNTRY_NAME, sum(count) as c from flight group by DEST_COUNTRY_NAME \
+order by c desc limit 10 ").show()
+
+#Performing same group by operation and sorting using dataframe but in a different way.
+# WAY------> 1:
+
+flightData2015.groupby('DEST_COUNTRY_NAME').agg({'count':'sum'})\
+.withColumnRenamed('sum(count)', 'sum_count').sort('sum_count',ascending=False).show(10)
+
+# WAY------> 2: Here we have used directly the sum()
+flightData2015.groupBy("DEST_COUNTRY_NAME").sum("count")\
+.withColumnRenamed("sum(count)", "destination_total")\
+.sort("destination_total", ascending=False).limit(5).show()
+
+
+#schema on read and then printing the read schema.
+
+spark.read.format("json")\
+    .load("/mnt/hgfs/SharedVMFolder/flight-data/flight-data/json/2015-summary.json")\
+    .schema
+    
+spark.read.format("json")\
+    .load("/mnt/hgfs/SharedVMFolder/flight-data/flight-data/json/2015-summary.json")\
+    .printSchema()
+    
+    
+from pyspark.sql.types import StructField, StructType, StringType, LongType
+myManualSchema = StructType([
+StructField("DEST_COUNTRY_NAME", StringType(), True),
+StructField("ORIGIN_COUNTRY_NAME", StringType(), True),
+StructField("count", LongType(), False, metadata={"hello":"world"})])
+
+df = spark.read.format("json").schema(myManualSchema)\
+     .load("/mnt/hgfs/SharedVMFolder/flight-data/flight-data/json/2015-summary.json")
+     
+
+df.schema
+df.printSchema()
+df.columns
+cols_list=['DEST_COUNTRY_NAME','count']
+df.select(cols_list).show(5)
+df.select('DEST_COUNTRY_NAME','count').show(5)
+
+
+#Expressions
+
+from pyspark.sql.functions import expr, col, column
+df.select(
+expr("DEST_COUNTRY_NAME"),
+col("DEST_COUNTRY_NAME"),
+column("DEST_COUNTRY_NAME"))\
+.show(2)
+
+
+# expr() takes only one param 
+
+df.select(expr('DEST_COUNTRY_NAME as Dest')).show(4)
+df.select(expr("DEST_COUNTRY_NAME AS Dest").alias("destination")).show(2)
+
+# selectExpr()
+
+#selecting 2 cols using selectExpr()
+df.selectExpr('DEST_COUNTRY_NAME','count','DEST_COUNTRY_NAME == ORIGIN_COUNTRY_NAME as WithinCountry').show(3)
+
+#selecting 1 col using selectExpr()
+df.selectExpr('DEST_COUNTRY_NAME','DEST_COUNTRY_NAME == ORIGIN_COUNTRY_NAME as WithinCountry').show(3)
+
+#select all cols
+df.selectExpr('*').show(2)
+
+# creating a new column based on a condition 
+df.selectExpr('*','DEST_COUNTRY_NAME == ORIGIN_COUNTRY_NAME as WithinCountry').show(3)
+df1=df.selectExpr('*','DEST_COUNTRY_NAME == ORIGIN_COUNTRY_NAME as WithinCountry')
+
+#Another way to create a new col. based on condition
+df.withColumn('WithinCountry', expr('DEST_COUNTRY_NAME == ORIGIN_COUNTRY_NAME')).show(3)
+
+Literals, Adding and Renaming Columns
+
+#creating a new col 'lit' with a default value of 1
+
+from pyspark.sql.functions import lit
+df2=df.select(expr('*'), lit(1).alias("One"))
+df2.printSchema()
+df2.show(3)
+
+# creating a new column based on a condition 
+df.selectExpr('*','DEST_COUNTRY_NAME == ORIGIN_COUNTRY_NAME as WithinCountry').show(3)
+df1=df.selectExpr('*','DEST_COUNTRY_NAME == ORIGIN_COUNTRY_NAME as WithinCountry')
+
+#Another way to create a new col. based on condition
+df.withColumn('WithinCountry', expr('DEST_COUNTRY_NAME == ORIGIN_COUNTRY_NAME')).show(3)
+
+
+# renaming cols without using alias() by using columnRenamed
+df.withColumnRenamed("DEST_COUNTRY_NAME", "Dest").columns
+
+
+#drop a column
+df3=df
+df3.columns
+df3.withColumnRenamed("DEST_COUNTRY_NAME", "Dest").columns
+df3.drop("ORIGIN_COUNTRY_NAME").columns
+
+#3 ways to filter on a col.
+
+#WAY----->1:
+df.filter(col("count") < 2).show(2)
+
+#WAY----->2:
+df.filter("count < 2").show(2)
+
+#WAY----->3: Filtering using a WHERE
+df.where(col("count") < 2).show(2)
+df.where(col("ORIGIN_COUNTRY_NAME") != "Croatia").show(3)
+
+#Combining multiple where conditions
+df.where(col("count") < 2).where(col("ORIGIN_COUNTRY_NAME") != "Croatia").show(3)
+
+#LOGICAL OR check
+df.where((col("count") < 2) | (col("ORIGIN_COUNTRY_NAME") != "Croatia")).show(2)
+
+#UNIQUE RECORDS
+df.select("ORIGIN_COUNTRY_NAME", "DEST_COUNTRY_NAME").distinct().show(n=5)
+print('Count Distinct records:', df.select("ORIGIN_COUNTRY_NAME", "DEST_COUNTRY_NAME").distinct().count())
+
+#SORT
+from pyspark.sql.functions import desc, asc
+df.orderBy(expr("count desc")).show(10)
+df.orderBy(col("count").desc(), col("DEST_COUNTRY_NAME").asc()).show(2)
+
+#TAKE() and LIMIT() and COLLECT()
+df4=df.limit(10)
+df4.show()
+df4.take(4)
+df4.collect()
+
+
