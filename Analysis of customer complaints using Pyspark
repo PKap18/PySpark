@@ -1,0 +1,144 @@
+from pyspark.sql import *
+from pyspark.sql.functions import *
+spark = SparkSession.builder.appName("Lecture_9").enableHiveSupport().getOrCreate()
+
+df_cust = spark\
+.read\
+.option("inferSchema", "true")\
+.option("delimiter","\t")\
+.csv("s3://allcustomercomplaints/complaints_user_tab.csv")
+
+df_census= spark\
+.read\
+.option("inferSchema", "true")\
+.option("delimiter","\t")\
+.csv("s3://tractzip/*1*.csv")
+
+df_zip= spark\
+.read\
+.option("inferSchema", "true")\
+.option("delimiter","\t")\
+.csv("s3://zipbasedmean/MeanZIP_tab.csv")
+
+df_zip=df_zip\
+.withColumnRenamed("_c0","ZIP")\
+.withColumnRenamed("_c1","Median")\
+.withColumnRenamed("_c2","Mean")\
+.withColumnRenamed("_c3","Pop")
+
+
+df_cust=df_cust\
+.withColumnRenamed("_c0",'Date_received')\
+.withColumnRenamed("_c1",'Product')\
+.withColumnRenamed("_c2","Sub_product")\
+.withColumnRenamed("_c3",'Issue')\
+.withColumnRenamed("_c4","Sub_issue")\
+.withColumnRenamed("_c5","Consumer_complaint_narrative")\
+.withColumnRenamed("_c6","Company_public_response")\
+.withColumnRenamed("_c7",'Company')\
+.withColumnRenamed("_c8",'State')\
+.withColumnRenamed("_c9",'ZIP_code')\
+.withColumnRenamed("_c10",'Tags')\
+.withColumnRenamed("_c11",'Consumer_consent_provided?')\
+.withColumnRenamed("_c12",'Submitted_via')\
+.withColumnRenamed("_c13",'Date_sent_to_company')\
+.withColumnRenamed("_c14",'Companyresponse_to_consumer')\
+.withColumnRenamed("_c15",'Timely_response')\
+.withColumnRenamed("_c16",'Consumer_disputed?')\
+.withColumnRenamed("_c17",'Complaint_ID')
+
+df_census=df_census\
+.withColumnRenamed("_c0","ZIP")\
+.withColumnRenamed("_c1","TRACT")\
+.withColumnRenamed("_c2","COUNTY")\
+.withColumnRenamed("_c3","CBSA")\
+.withColumnRenamed("_c4","RES_RATIO")\
+.withColumnRenamed("_c5","BUS_RATIO")\
+.withColumnRenamed("_c6","OTH_RATIO")\
+.withColumnRenamed("_c7","TOT_RATIO")
+
+df_zip1=df_zip.withColumn("RegionCode",expr("substring(Zip, 1, length(Zip)-(length(Zip)-1))"))
+df_cust1=df_cust.withColumn("RegionCode",expr("substring(ZIP_code,1,length(ZIP_code)-(length(ZIP_code)-1))"))
+df_census=df_census.withColumn("RegionCode",expr("substring(ZIP,1,length(ZIP)-(length(ZIP)-1))"))
+
+df_census.count()
+
+df_zip.createOrReplaceTempView("zip")
+df_cust.createOrReplaceTempView("cust")
+df_census.createOrReplaceTempView("census")
+
+joinExpression1 = df_zip["ZIP"] == df_cust['ZIP_code']
+joinType = "inner"
+dfj1=df_zip.join(df_cust, joinExpression1, joinType)
+dfj2=dfj1.drop(dfj1['ZIP_code'])
+dfj2=dfj2.withColumn("RegionCode",expr("substring(ZIP, 1, length(ZIP)-(length(ZIP)-1))"))
+
+dfj2=dfj2.withColumnRenamed("Timely_response?","Timely_response")
+dfj2.head()
+dfj2.createOrReplaceTempView("zip_cust"
+
+#Analyzing customer complaints
+# Analyzing the cusotmer data to find out which region has most issues recorded to take further a region focussed analysis.
+spark.sql("select regioncode,count(issue) c from zip_cust group by regioncode order by c desc ").show()
+
+%%sql -q -n 100 -o df1 
+select regioncode,count(issue) issue_count from zip_cust group by regioncode order by issue_count desc
+
+%%local print('Data frame shape:',df1.shape)
+%%local df1.head()
+
+# Analyzing the cusotmer data to find out which product has most issues recorded to take further a region focussed analysis.
+spark.sql("select product,count(issue) issue_count from zip_cust group by product order by issue_count desc ").show()
+
+%%sql -q -n 100 -o df2
+select product,count(issue) issue_count from zip_cust group by product order by issue_count desc
+
+%%local print('Data frame shape:',df2.shape)
+%%local df2.head()
+
+# Analyzing the cusotmer data to find out which sub-product has most issues recorded to take further a region focussed analysis.
+spark.sql("select regioncode,sub_product,count(issue) issue_count from zip_cust where sub_product != 'None' group by regioncode,sub_product order by issue_count desc ").show()
+
+%%sql -q -n 100 -o df3
+select regioncode,sub_product,count(issue) issue_count from zip_cust where sub_product != 'None' group by regioncode,sub_product order by issue_count desc
+
+%%local print('Data frame shape:',df3.shape)
+%%local df3.head()
+
+#Analyzing Region 9,3,7
+spark.sql("select company, count(issue) issue_count, regioncode from zip_cust group by regioncode,company order by issue_count desc").show()
+%%sql -q -n 100 -o df4
+
+select company, count(issue) issue_count, regioncode from zip_cust group by regioncode,company order by issue_count desc
+%%local print('Data frame shape:',df4.shape)
+
+%%local print('Data frame shape:',df4.shape)
+%%local df4.head()
+
+spark.sql("select company, count(issue) issue_count from zip_cust where regioncode in (3,9,7) group by company order by issue_count desc").show()
+%%sql -q -n 100 -o df5
+select company, count(issue) issue_count from zip_cust where regioncode in (3,9,7) group by company order by issue_count desc
+
+%%local print('Data frame shape:',df5.shape)
+%%local df5.head()
+spark.sql("select  avg(mean) as AvgMean, regioncode from zip_cust where regioncode in (3,7,9) group by regioncode").show()
+%%sql -q -n 100 -o df6
+select  avg(mean) as AvgMean, regioncode from zip_cust where regioncode in (3,7,9) group by regioncode
+
+%%local print('Data frame shape:',df6.shape)
+%%local df6.head()
+spark.sql("select  avg(median) as AvgMed, regioncode from zip_cust where regioncode in (3,7,9) group by regioncode").show()
+
+%%sql -q -n 100 -o df7
+select  avg(median) as AvgMed, regioncode from zip_cust where regioncode in (3,7,9) group by regioncode
+%%local print('Data frame shape:',df7.shape)
+%%local df7.head()
+
+spark.sql("select  avg(pop) as AvgPop_inK, regioncode from zip_cust where regioncode in (3,7,9) group by regioncode").show()
+%%sql -q -n 100 -o df8
+select  avg(pop) as AvgPop_inK, regioncode from zip_cust where regioncode in (3,7,9) group by regioncode
+%%local print('Data frame shape:',df8.shape)
+
+
+spark.sql("select Companyresponse_to_consumer as CRC, regioncode from zip_cust where regioncode in (3,7,9) group by regioncode,CRC").show(10,False)
+spark.sql("select product, count(*) as Product_Count,count(*) * 100.0/ sum(count(*)) over () as percent_product from zip_cust where regioncode in (3,7,9) group by product order by Product_count desc").show()
